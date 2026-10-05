@@ -17,9 +17,11 @@ import type { ModelRuntime } from "../../core/model-runtime.ts";
 import type { SettingsManager } from "../../core/settings-manager.ts";
 import { AgentController } from "./agent-controller.ts";
 import { createAgentController } from "./agent-controller-provider.ts";
+import { createHistoryServiceFacet } from "./history-provider.ts";
 import { createModelsServiceFacet } from "./models-provider.ts";
 import { SessionPlugins } from "./plugins.ts";
 import { createTranscriptServiceFacet } from "./transcript-provider.ts";
+import { createUiRequestsServiceFacet } from "./ui-requests-provider.ts";
 
 export interface SessionWorkerRuntime {
 	readonly harness: Harness;
@@ -74,6 +76,8 @@ export async function createSessionWorkerServices(options: {
 		pluginRuntimeFacet,
 		await createModelsServiceFacet({ ...options, context: BACKGROUND_CONTEXT }),
 		await createTranscriptServiceFacet(options.conversation, BACKGROUND_CONTEXT),
+		createHistoryServiceFacet(options.conversation),
+		createUiRequestsServiceFacet(),
 	]).load();
 	const pluginLoader = options.facetLoader ?? createStaticFacetLoader([]);
 	let loadedPlugins = await pluginLoader.load();

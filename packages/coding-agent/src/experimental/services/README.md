@@ -20,6 +20,8 @@ PI_EXPERIMENTAL=1 ./pi-test.sh client
 | session | `Models` | state, default-persisting selection, thinking, refresh implemented | move provider/auth composition behind plugin facets |
 | session | `AgentController` | presentation-safe facade over the root durable conversation for prompting, steering, follow-ups, queue cancellation, abort, compaction, and waiting for a prompt's answer | add new conversation operations only when a presentation requires them |
 | session | `Transcript` | the root conversation's durable `ConversationView` as replicated state | add projections only when another presentation needs them |
+| session | `History` | pages the root conversation's whole durable history, newest first, past the resets and compactions the `Transcript` view hides | add filters only when a presentation needs them |
+| session | `UiRequests` | questions extensions ask the person (select, confirm, input), status lines and notices as replicated state, with `respond` and `cancel`; session facets ask through the local `UiRequestHost`, and an unanswered question times out instead of blocking | route the stable extension UI context through the host |
 | presentation | `SlashCommands` | process-local contribution registry with model, thinking, compact, reload, and example hello commands | add more presentation hookpoints only as concrete plugin slices require them |
 | presentation | `PresentationUI` | process-local selection and status capabilities | add narrowly scoped UI capabilities only when commands require them |
 
@@ -42,4 +44,4 @@ Deferred while the worker moves from the removed `AgentHarness` to `@earendil-wo
 - Tree navigation: `AgentController.navigate()` is dropped. Durable branches by forking into a new conversation, so navigation needs a fork, a summary entry that starts the new context, and a pointer to the Session's current conversation.
 - Next-run queue: `AgentController.nextRun()` is dropped. Durable queues only steering and follow-up input. `resume()` is dropped as well: the worker resumes interrupted work when it opens the Session.
 - Subagents: the services cover only the root conversation. Exposing subagent conversations needs keyed service instances per conversation.
-- Transcript history: the `Transcript` state is the conversation's view, which holds only the active context since the newest reset or compaction. Older entries need a paging method over `Conversation.entries()`.
+- Transcript history: done by the `History` service (a paging method over `Conversation.entries()`).
