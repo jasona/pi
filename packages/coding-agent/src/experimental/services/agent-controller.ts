@@ -9,6 +9,13 @@ export interface AgentPromptImage {
 export interface AgentPromptRequest {
 	message: string;
 	images: AgentPromptImage[] | null;
+	/**
+	 * Optional client-chosen idempotency key, scoped to the conversation. Repeating a key returns the original
+	 * submission instead of admitting the input again, so a client that lost a response can retry safely or ask
+	 * `lookup()` whether the input arrived. The key identifies the request, not its content: pick a fresh key for
+	 * different content.
+	 */
+	requestId?: string | null;
 }
 
 export interface AgentOperationError {
@@ -31,6 +38,24 @@ export type AgentPromptResult =
 	| { status: "done"; text: string; reason: null }
 	| { status: "unanswered"; text: null; reason: string };
 
+/**
+ * What the conversation knows about a request key. `found: false` means no submission carries it now, which is
+ * not proof it never arrived if the engine's record could have been lost; within one durable conversation it is.
+ */
+export type AgentRequestStatus =
+	| { found: false }
+	| {
+			found: true;
+			/** The durable submission: the same id `prompt()` returned (or would have). */
+			operationId: string;
+			/** `queued`: admitted behind a run. `placed`: running. `done`/`unanswered`: settled. */
+			status: "queued" | "placed" | "done" | "unanswered";
+			/** Why an `unanswered` submission got no answer: `aborted`, `model_error`, `no_model` or `stale`. */
+			reason: string | null;
+			/** The failure's text when the engine recorded one (for example the model's error message). */
+			detail: string | null;
+	  };
+
 export interface AgentCompactionRequest {
 	customInstructions: string | null;
 }
@@ -50,6 +75,8 @@ export interface AgentController {
 	/** Withdraw queued input and abort the active run and compaction. */
 	abort(context: Context): Promise<void>;
 	compact(request: AgentCompactionRequest, context: Context): Promise<AgentOperationResponse>;
+	/** Ask whether a request key reached this conversation, without admitting anything. */
+	lookup(requestId: string, context: Context): Promise<AgentRequestStatus>;
 	/** Wait until the prompt with this `operationId` is answered or settles unanswered. */
 	waitForPrompt(operationId: string, context: Context): Promise<AgentPromptResult>;
 }

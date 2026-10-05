@@ -578,6 +578,15 @@ export interface Harness extends Session {
 	inspect(context: Context): Promise<HarnessInspection>;
 	/** Reacquire a submission, for example after reopen. */
 	submission(id: SubmissionId, context: Context): Promise<Submission | undefined>;
+	/**
+	 * The submission a conversation-scoped host request key identifies, or undefined when none does. Unlike
+	 * `Conversation.submit()` with the same key it never admits anything, so it can answer "did this arrive?".
+	 */
+	submissionByRequest(
+		conversationId: ConversationId,
+		requestId: string,
+		context: Context,
+	): Promise<Submission | undefined>;
 	/** `not_found` for an unknown submission or one of another conversation than `conversationId`. */
 	abortSubmission(
 		id: SubmissionId,

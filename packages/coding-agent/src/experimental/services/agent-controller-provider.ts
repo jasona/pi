@@ -13,6 +13,7 @@ import type {
 	AgentPromptRequest,
 	AgentPromptResult,
 	AgentQueueResponse,
+	AgentRequestStatus,
 } from "./agent-controller.ts";
 
 export function createAgentController(harness: Harness, conversation: Conversation): AgentControllerService {
@@ -22,7 +23,10 @@ export function createAgentController(harness: Harness, conversation: Conversati
 		context: Context,
 	): Promise<AgentQueueResponse> => {
 		try {
-			const submission = await conversation.submit({ type: "input", content: toInput(request), whenBusy }, context);
+			const submission = await conversation.submit(
+				{ type: "input", content: toInput(request), whenBusy, ...requestKey(request) },
+				context,
+			);
 			return { accepted: true, entryId: String(submission.id), error: null };
 		} catch (error) {
 			return { accepted: false, entryId: null, error: toAgentError(error) };
@@ -33,7 +37,7 @@ export function createAgentController(harness: Harness, conversation: Conversati
 		async prompt(request, context) {
 			try {
 				const submission = await conversation.submit(
-					{ type: "input", content: toInput(request), whenBusy: "reject" },
+					{ type: "input", content: toInput(request), whenBusy: "reject", ...requestKey(request) },
 					context,
 				);
 				return { accepted: true, operationId: String(submission.id), error: null };
@@ -52,6 +56,23 @@ export function createAgentController(harness: Harness, conversation: Conversati
 			};
 		},
 		abort: (context) => conversation.abort(context),
+		async lookup(requestId, context): Promise<AgentRequestStatus> {
+			const submission = await harness.submissionByRequest(conversation.id, requestId, context);
+			if (submission === undefined) return { found: false };
+			const record = await submission.status(context);
+			return {
+				found: true,
+				operationId: String(record.id),
+				status: record.status,
+				reason: record.status === "unanswered" ? String(record.reason) : null,
+				detail:
+					record.status === "unanswered" && record.detail !== undefined
+						? typeof record.detail === "string"
+							? record.detail
+							: JSON.stringify(record.detail)
+						: null,
+			};
+		},
 		async compact(request, context) {
 			try {
 				const id = await conversation.compact(request.customInstructions ?? undefined, context);
@@ -81,6 +102,11 @@ export function createAgentController(harness: Harness, conversation: Conversati
 function parseSubmissionId(value: string): SubmissionId | undefined {
 	const id = Number(value);
 	return /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(id) ? (id as SubmissionId) : undefined;
+}
+
+/** The durable request key, only when the caller supplied a non-empty one. */
+function requestKey(request: AgentPromptRequest): { requestId?: string } {
+	return typeof request.requestId === "string" && request.requestId.length > 0 ? { requestId: request.requestId } : {};
 }
 
 function toInput(request: AgentPromptRequest): UserInput {

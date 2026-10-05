@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
@@ -64,6 +64,26 @@ export async function ensurePrivateServerDirectory(directory: string): Promise<v
 		throw new Error(`Unix socket directory is not owned by the current user: ${directory}`);
 	}
 	await chmod(directory, 0o700);
+}
+
+/**
+ * The working directory for a new Session: the server's own when none is requested, otherwise an
+ * existing directory given as an absolute path, resolved through symlinks. The Session's tools run
+ * there with this process's permissions, so a vague or missing target is refused rather than guessed.
+ */
+export async function resolveSessionCwd(requested: string | undefined): Promise<string> {
+	if (requested === undefined) return process.cwd();
+	if (typeof requested !== "string" || requested.length === 0 || !isAbsolute(requested)) {
+		throw new RoutedServerError("service_invalid_value", "Session cwd must be an absolute path");
+	}
+	let resolved: string;
+	try {
+		resolved = await realpath(requested);
+		if (!(await stat(resolved)).isDirectory()) throw new Error("not a directory");
+	} catch {
+		throw new RoutedServerError("service_invalid_value", `Session cwd is not an existing directory: ${requested}`);
+	}
+	return resolved;
 }
 
 export function resolveSessionDirectory(sessionDir?: string): string {
@@ -392,12 +412,15 @@ async function startServerBackend(
 		if (metadata === undefined) throw new SessionNotFoundError(`Unknown session: ${sessionId}`);
 		return metadata;
 	};
-	const createSession = (createOptions: SessionCreateOptions): Promise<SessionCatalogMetadata> =>
-		createCatalogSession(sessionDir, { ...createOptions, cwd: process.cwd() });
+	const createSession = async (createOptions: SessionCreateOptions): Promise<SessionCatalogMetadata> => {
+		const { cwd: requestedCwd, ...rest } = createOptions;
+		return createCatalogSession(sessionDir, { ...rest, cwd: await resolveSessionCwd(requestedCwd) });
+	};
 	const summarize = (metadata: SessionCatalogMetadata): SessionSummary => ({
 		serverId,
 		sessionId: metadata.id,
 		createdAt: metadata.createdAt,
+		cwd: metadata.cwd,
 	});
 	const serverServices = await createExperimentalServerServices({
 		list: async () =>

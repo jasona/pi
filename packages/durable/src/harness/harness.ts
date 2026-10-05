@@ -259,6 +259,14 @@ class HarnessImpl<Tool extends ToolRegistration> extends SessionImpl implements 
 		return this.#submissions.get(id, context);
 	}
 
+	submissionByRequest(
+		conversationId: ConversationId,
+		requestId: string,
+		context: Context,
+	): Promise<Submission | undefined> {
+		return this.#submissions.getByRequest(conversationId, requestId, context);
+	}
+
 	abortSubmission(
 		id: SubmissionId,
 		context: Context,

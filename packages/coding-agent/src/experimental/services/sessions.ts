@@ -8,10 +8,14 @@ export interface SessionAddress {
 
 export interface SessionSummary extends SessionAddress {
 	createdAt: number;
+	/** The working directory the Session's agent runs in. */
+	cwd: string;
 }
 
 export interface SessionCreateOptions {
 	id?: string;
+	/** Absolute path of an existing directory for the Session's agent. Defaults to the server's own. */
+	cwd?: string;
 }
 
 export interface SessionDirectoryState {

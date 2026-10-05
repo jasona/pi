@@ -97,6 +97,135 @@ describe("AgentController service", () => {
 		}
 	});
 
+	test("a repeated request key returns the original submission and admits nothing twice", async () => {
+		const { harness, conversation, close } = await openFauxConversation([fauxAssistantMessage("once")]);
+		const controller = createAgentController(harness, conversation);
+		try {
+			const request = { message: "hello", images: null, requestId: "client-1" };
+			const first = await controller.prompt(request, BACKGROUND_CONTEXT);
+			expect(first).toEqual({ accepted: true, operationId: expect.any(String), error: null });
+			if (!first.accepted) throw new Error("Prompt was rejected");
+			await controller.waitForPrompt(first.operationId, BACKGROUND_CONTEXT);
+
+			// The retry after a lost response, even once the run has finished, is the same submission.
+			const retry = await controller.prompt(request, BACKGROUND_CONTEXT);
+			expect(retry).toEqual({ accepted: true, operationId: first.operationId, error: null });
+
+			const view = await conversation.viewState(BACKGROUND_CONTEXT);
+			try {
+				const users = view.value.entries.filter((entry) => entry.model?.[0]?.role === "user");
+				expect(users).toHaveLength(1);
+			} finally {
+				view.dispose();
+			}
+		} finally {
+			await close();
+		}
+	});
+
+	test("a request key is honored while the conversation is busy, a new key is not", async () => {
+		const pending = pendingResponse();
+		const { harness, conversation, close } = await openFauxConversation([pending.step]);
+		const controller = createAgentController(harness, conversation);
+		try {
+			const first = await controller.prompt({ message: "first", images: null, requestId: "k1" }, BACKGROUND_CONTEXT);
+			if (!first.accepted) throw new Error("Prompt was rejected");
+			await pending.reached;
+			await expect(
+				controller.prompt({ message: "first", images: null, requestId: "k1" }, BACKGROUND_CONTEXT),
+			).resolves.toEqual({ accepted: true, operationId: first.operationId, error: null });
+			await expect(
+				controller.prompt({ message: "other", images: null, requestId: "k2" }, BACKGROUND_CONTEXT),
+			).resolves.toMatchObject({ accepted: false, error: { code: "busy" } });
+			// Steering and follow-up take keys too.
+			const steer = await controller.steer({ message: "steer", images: null, requestId: "s1" }, BACKGROUND_CONTEXT);
+			const again = await controller.steer({ message: "steer", images: null, requestId: "s1" }, BACKGROUND_CONTEXT);
+			expect(steer).toEqual({ accepted: true, entryId: expect.any(String), error: null });
+			expect(again).toEqual(steer);
+			await controller.abort(BACKGROUND_CONTEXT);
+		} finally {
+			await close();
+		}
+	});
+
+	test("lookup reports a key's submission without ever admitting one", async () => {
+		const { harness, conversation, close } = await openFauxConversation([fauxAssistantMessage("answer")]);
+		const controller = createAgentController(harness, conversation);
+		try {
+			await expect(controller.lookup("never-sent", BACKGROUND_CONTEXT)).resolves.toEqual({ found: false });
+			// Asking did not create it: still unknown, and the transcript is untouched.
+			await expect(controller.lookup("never-sent", BACKGROUND_CONTEXT)).resolves.toEqual({ found: false });
+			const empty = await conversation.viewState(BACKGROUND_CONTEXT);
+			try {
+				expect(empty.value.entries).toHaveLength(0);
+			} finally {
+				empty.dispose();
+			}
+
+			const sent = await controller.prompt(
+				{ message: "hello", images: null, requestId: "sent-1" },
+				BACKGROUND_CONTEXT,
+			);
+			if (!sent.accepted) throw new Error("Prompt was rejected");
+			await controller.waitForPrompt(sent.operationId, BACKGROUND_CONTEXT);
+			await expect(controller.lookup("sent-1", BACKGROUND_CONTEXT)).resolves.toEqual({
+				found: true,
+				operationId: sent.operationId,
+				status: "done",
+				reason: null,
+				detail: null,
+			});
+		} finally {
+			await close();
+		}
+	});
+
+	test("lookup reports a run in progress as placed and an aborted one as unanswered", async () => {
+		const pending = pendingResponse();
+		const { harness, conversation, close } = await openFauxConversation([pending.step]);
+		const controller = createAgentController(harness, conversation);
+		try {
+			const sent = await controller.prompt({ message: "work", images: null, requestId: "w1" }, BACKGROUND_CONTEXT);
+			if (!sent.accepted) throw new Error("Prompt was rejected");
+			await pending.reached;
+			await expect(controller.lookup("w1", BACKGROUND_CONTEXT)).resolves.toMatchObject({
+				found: true,
+				operationId: sent.operationId,
+				status: "placed",
+			});
+			await controller.abort(BACKGROUND_CONTEXT);
+			await controller.waitForPrompt(sent.operationId, BACKGROUND_CONTEXT);
+			await expect(controller.lookup("w1", BACKGROUND_CONTEXT)).resolves.toMatchObject({
+				found: true,
+				status: "unanswered",
+				reason: "aborted",
+				detail: null,
+			});
+		} finally {
+			await close();
+		}
+	});
+
+	test("lookup carries the model's error text for a run that failed", async () => {
+		const { harness, conversation, close } = await openFauxConversation([
+			fauxAssistantMessage([], { stopReason: "error", errorMessage: "provider unavailable" }),
+		]);
+		const controller = createAgentController(harness, conversation);
+		try {
+			const sent = await controller.prompt({ message: "go", images: null, requestId: "e1" }, BACKGROUND_CONTEXT);
+			if (!sent.accepted) throw new Error("Prompt was rejected");
+			await controller.waitForPrompt(sent.operationId, BACKGROUND_CONTEXT);
+			await expect(controller.lookup("e1", BACKGROUND_CONTEXT)).resolves.toMatchObject({
+				found: true,
+				status: "unanswered",
+				reason: "model_error",
+				detail: expect.stringContaining("provider unavailable"),
+			});
+		} finally {
+			await close();
+		}
+	});
+
 	test("starts a compaction task", async () => {
 		const { harness, conversation, close } = await openFauxConversation();
 		const controller = createAgentController(harness, conversation);

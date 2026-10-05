@@ -66,6 +66,18 @@ export class Submissions {
 		return record === undefined ? undefined : new SubmissionHandle(record.id, this);
 	}
 
+	/** The submission a conversation-scoped request key identifies, without admitting anything. */
+	async getByRequest(
+		conversationId: ConversationId,
+		requestId: string,
+		context: Context,
+	): Promise<Submission | undefined> {
+		const record = await this.#session.readOnLine(() =>
+			this.#storage.submissionByRequest(conversationId, requestId, context),
+		);
+		return record === undefined ? undefined : new SubmissionHandle(record.id, this);
+	}
+
 	async status(id: SubmissionId, context: Context): Promise<SubmissionRecord> {
 		const record = await this.#session.readOnLine(() => this.#storage.submission(id, context));
 		if (record === undefined) throw new Error(`Submission ${id} does not exist`);
