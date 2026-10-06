@@ -300,7 +300,8 @@ describe("generation", () => {
 		expect(await harness.abortTask(taskId, context)).toBe("marked");
 		expect(await submission.wait(context)).toMatchObject({ status: "unanswered", reason: "aborted" });
 		const entries = await allEntries(root);
-		expect(entries.map((entry) => entry.kind)).toEqual(["pi.user", "pi.assistant"]);
+		expect(entries.map((entry) => entry.kind)).toEqual(["pi.user", "pi.assistant", "pi.cancelled-input"]);
+		expect(entries[2]!.edits).toEqual([{ target: entries[0]!.id, action: "omit" }]);
 		const converted = entries[1]!.model![0] as AssistantMessage;
 		expect(converted.stopReason).toBe("aborted");
 		expect(textOf(converted)!.startsWith(textOf(partial as Message)!)).toBe(true);
@@ -605,7 +606,7 @@ describe("generation", () => {
 		expect(values.some((value) => value.generation?.message !== undefined)).toBe(false);
 		await harness.abortTask((await live(harness, root))!.run!.taskId, context);
 		expect(await submission.wait(context)).toMatchObject({ status: "unanswered", reason: "aborted" });
-		expect((await allEntries(root)).map((entry) => entry.kind)).toEqual(["pi.user"]);
+		expect((await allEntries(root)).map((entry) => entry.kind)).toEqual(["pi.user", "pi.cancelled-input"]);
 		await harness.close(context);
 	});
 

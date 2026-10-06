@@ -820,7 +820,30 @@ export class Transaction implements Tx {
 			const current = this.#submissions.get(id) ?? (await storage.submission(id, this.#context));
 			if (current === undefined) throw new Error(`Submission ${id} does not exist`);
 			const next = applySubmissionChange(current, change);
-			if (next !== current) this.#submissions.set(id, next);
+			if (next !== current) {
+				this.#submissions.set(id, next);
+				if (
+					current.type === "input" &&
+					current.status === "placed" &&
+					next.status === "unanswered" &&
+					next.reason === "aborted"
+				) {
+					// Stop retires the instruction, not the audit trail or completed tool effects.
+					// Commit the context edit atomically with settlement, so a later prompt cannot
+					// see a bare unanswered user request after the aborted assistant is excluded.
+					const entryId = await storage.mintId<EntryId>();
+					this.#writes.push({
+						type: "entry",
+						value: {
+							id: entryId,
+							conversationId: current.conversationId,
+							kind: "pi.cancelled-input",
+							edits: [{ target: current.entry, action: "omit" }],
+							...(this.#scope.taskId === undefined ? {} : { byTaskId: this.#scope.taskId }),
+						},
+					});
+				}
+			}
 		}
 
 		const writes = this.#writes;
